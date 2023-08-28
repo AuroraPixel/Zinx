@@ -16,21 +16,21 @@ type Connection struct {
 	//当前连接的状态
 	IsClosed bool
 
-	//当前连接所绑定的处理业务方法API
-	HandleAPI zface.HandleFunc
-
 	//告知当前连接已经退出的/停止 channel
 	ExitChan chan bool
+
+	//该链接的路由绑定
+	Router zface.IRouter
 }
 
 // NewConnection 初始化连接方法
-func NewConnection(conn *net.TCPConn, connID uint32, callBackAPI zface.HandleFunc) *Connection {
+func NewConnection(conn *net.TCPConn, connID uint32, router zface.IRouter) *Connection {
 	c := &Connection{
-		Conn:      conn,
-		ConnID:    connID,
-		IsClosed:  false,
-		HandleAPI: callBackAPI,
-		ExitChan:  make(chan bool, 1),
+		Conn:     conn,
+		ConnID:   connID,
+		IsClosed: false,
+		Router:   router,
+		ExitChan: make(chan bool, 1),
 	}
 	return c
 }
@@ -85,15 +85,26 @@ func (c *Connection) StartReader() {
 	for {
 		//读取客户端数据到buf周，最大512字节
 		buf := make([]byte, 512)
-		cnt, err := c.Conn.Read(buf)
+		_, err := c.Conn.Read(buf)
 		if err != nil {
 			fmt.Println("recv buf err", err)
 			continue
 		}
 		//调用当前连接所绑定handleAPI
-		if err := c.HandleAPI(c.Conn, buf, cnt); err != nil {
-			fmt.Println("ConnID", c.ConnID, "handle is error", err)
-			continue
+		//if err := c.HandleAPI(c.Conn, buf, cnt); err != nil {
+		//	fmt.Println("ConnID", c.ConnID, "handle is error", err)
+		//	continue
+		//}
+		//封装请求Request
+		req := Request{
+			conn: c,
+			data: buf,
 		}
+		//执行注册路由的方法
+		go func(request zface.IRequest) {
+			c.Router.PreHandle(request)
+			c.Router.Handle(request)
+			c.Router.PostHandle(request)
+		}(&req)
 	}
 }
